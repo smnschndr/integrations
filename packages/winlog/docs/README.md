@@ -44,8 +44,8 @@ channel. There are two ways to collect from more than one channel:
    ```
 
    You can build such a query in Event Viewer: create a custom view, switch to the **XML** tab and copy the
-   generated `QueryList`. Put the query on a single line as shown above, because multi-line values are only
-   escaped reliably on recent Kibana versions.
+   generated `QueryList`. Put the query on a single line as shown above: on older Kibana versions a multi-line
+   value produces an invalid agent policy, so a single-line query is the portable form.
 
    Note the trade-offs of this approach:
 
