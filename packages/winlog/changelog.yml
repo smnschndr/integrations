@@ -2,7 +2,7 @@
 - version: "2.7.0"
   changes:
     - description: Allow collecting from multiple event log channels in a single policy by fixing the `xml_query` option, which could not be used because the channel name was always set alongside it.
-      type: bugfix
+      type: enhancement
       link: https://github.com/elastic/integrations/pull/20970
     - description: Escape the `xml_query` value so that multi-line XML queries no longer break the generated agent policy.
       type: bugfix

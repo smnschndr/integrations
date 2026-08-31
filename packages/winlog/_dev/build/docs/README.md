@@ -27,20 +27,25 @@ channel. There are two ways to collect from more than one channel:
    its own dataset. This is the recommended approach when you need per-channel filtering, routing or ingest
    pipelines.
 2. **A single policy with a custom XML query.** Leave **Channel Name** empty and set **XML Query** to a
-   `QueryList` that selects from several channels. The input then queries all listed channels through one reader:
+   `QueryList` that selects from several channels. The input then queries all listed channels through one
+   reader. Because the query is mutually exclusive with the simple filter options, it also has to carry an
+   identifier, which is supplied through the **Custom Configurations** option:
+
+   *XML Query*
 
    ```xml
-   <QueryList>
-     <Query Id="0">
-       <Select Path="Application">*</Select>
-       <Select Path="System">*</Select>
-       <Select Path="Microsoft-Windows-PowerShell/Operational">*</Select>
-     </Query>
-   </QueryList>
+   <QueryList><Query Id="0"><Select Path="Application">*</Select><Select Path="System">*</Select><Select Path="Microsoft-Windows-PowerShell/Operational">*</Select></Query></QueryList>
+   ```
+
+   *Custom Configurations*
+
+   ```yaml
+   id: my-multi-channel-query
    ```
 
    You can build such a query in Event Viewer: create a custom view, switch to the **XML** tab and copy the
-   generated `QueryList`.
+   generated `QueryList`. Put the query on a single line as shown above, because multi-line values are only
+   escaped reliably on recent Kibana versions.
 
    Note the trade-offs of this approach:
 
@@ -48,13 +53,8 @@ channel. There are two ways to collect from more than one channel:
      **Level** and **Providers**. All filtering has to be expressed inside the query itself.
    - All matched events are written to the single dataset configured in the policy, so events from different
      channels cannot be routed to different indices.
-   - All channels share one checkpoint, so collection resumes for the query as a whole rather than per channel.
-   - If the agent logs `event log is missing an 'id'`, add a unique identifier through the
-     **Custom Configurations** option:
-
-     ```yaml
-     id: my-multi-channel-query
-     ```
+   - All channels share one reader and one checkpoint, so collection resumes for the query as a whole rather
+     than per channel.
 
 ### Windows Event ID clause limit
 
