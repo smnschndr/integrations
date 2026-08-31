@@ -3,7 +3,7 @@ name: winlog
 title: Custom Windows Event Logs
 description: Collect and parse logs from any Windows event log channel with Elastic Agent.
 type: input
-version: "2.6.1"
+version: "2.7.0"
 conditions:
   kibana:
     version: '^8.10.1 || ^9.0.0'
@@ -26,8 +26,8 @@ policy_templates:
         type: text
         title: Channel Name
         description: >-
-          Name of Windows event log channel (eg. Microsoft-Windows-PowerShell/Operational). It expects a single channel name. To collect multiple channels, add multiple integrations.
-        required: true
+          Name of a single Windows event log channel (eg. Microsoft-Windows-PowerShell/Operational). The winlog input reads one channel per configuration, so this option accepts exactly one name. To collect several channels, either add one integration policy per channel, or leave this empty and use the `XML Query` option below, which can select from multiple channels in a single query. Required unless `XML Query` is set.
+        required: false
         show_user: true
       - name: data_stream.dataset
         type: text
@@ -105,9 +105,9 @@ policy_templates:
         type: text
         title: XML Query
         description: >-
-          Provide a custom XML query. This option is mutually exclusive with the `name`, `event_id`, `ignore_older`, `level`, and `providers` options. These options should be included in the XML query directly. Furthermore, an id must be provided. Custom XML queries provide more flexibility and advanced options than the simpler query options.
+          Provide a custom XML query. This option is mutually exclusive with the `Channel Name`, `Event ID`, `Ignore events older than`, `Level`, and `Providers` options; those filters must be expressed inside the XML query instead. A custom query can select from more than one channel by listing several `Select` elements, which is the only way to collect multiple channels with a single integration policy. Custom XML queries provide more flexibility and advanced options than the simpler query options.
         required: false
-        show_user: false
+        show_user: true
       - name: tags
         type: text
         title: Tags

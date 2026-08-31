@@ -1,13 +1,13 @@
 condition: ${host.platform} == 'windows'
 data_stream:
   dataset: {{data_stream.dataset}}
-name: {{channel}}
 {{#if forwarded}}
 forwarded: true
 {{/if}}
 {{#if xml_query}}
-xml_query: {{xml_query}}
+xml_query: {{escape_string xml_query}}
 {{else}}
+name: {{channel}}
 {{#if providers}}
 provider:
 {{#each providers as |p|}}

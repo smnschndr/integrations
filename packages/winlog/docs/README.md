@@ -18,6 +18,44 @@ Using the System or Windows integrations for their supported channels provides b
 
 ## Configuration
 
+### Collecting multiple channels
+
+The `winlog` input reads exactly one channel per configuration, so the **Channel Name** option accepts a single
+channel. There are two ways to collect from more than one channel:
+
+1. **One integration policy per channel.** Each policy gets its own reader, its own checkpoint and, if you want,
+   its own dataset. This is the recommended approach when you need per-channel filtering, routing or ingest
+   pipelines.
+2. **A single policy with a custom XML query.** Leave **Channel Name** empty and set **XML Query** to a
+   `QueryList` that selects from several channels. The input then queries all listed channels through one reader:
+
+   ```xml
+   <QueryList>
+     <Query Id="0">
+       <Select Path="Application">*</Select>
+       <Select Path="System">*</Select>
+       <Select Path="Microsoft-Windows-PowerShell/Operational">*</Select>
+     </Query>
+   </QueryList>
+   ```
+
+   You can build such a query in Event Viewer: create a custom view, switch to the **XML** tab and copy the
+   generated `QueryList`.
+
+   Note the trade-offs of this approach:
+
+   - **XML Query** is mutually exclusive with **Channel Name**, **Event ID**, **Ignore events older than**,
+     **Level** and **Providers**. All filtering has to be expressed inside the query itself.
+   - All matched events are written to the single dataset configured in the policy, so events from different
+     channels cannot be routed to different indices.
+   - All channels share one checkpoint, so collection resumes for the query as a whole rather than per channel.
+   - If the agent logs `event log is missing an 'id'`, add a unique identifier through the
+     **Custom Configurations** option:
+
+     ```yaml
+     id: my-multi-channel-query
+     ```
+
 ### Windows Event ID clause limit
 
 If you specify more than 22 query conditions (event IDs or event ID ranges), some
