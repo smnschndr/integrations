@@ -1,4 +1,9 @@
 # newer versions go on top
+- version: "1.36.11"
+  changes:
+    - description: Improve ingest pipeline throughput by parsing the key/value payload and the syslog header in single-pass scripts and by avoiding a date parse exception per event.
+      type: enhancement
+      link: https://github.com/elastic/integrations/pull/99999
 - version: "1.36.10"
   changes:
     - description: Fix login pipeline incorrectly setting `user.name` to "and" when an admin accepts a login disclaimer (FortiOS 7.6.x).

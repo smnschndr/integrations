@@ -12,8 +12,54 @@ processors:
   - remove:
       tag: remove_message_7144efd2
       field: message
+  - script:
+      tag: script_split_legacy_syslog_header
+      lang: painless
+      if: ctx.event?.original instanceof String
+      description: |
+        Fast path for the default FortiGate format ("<PRI>key=value ..." or no PRI at all),
+        producing the same result as the second grok pattern below. Messages that may be
+        RFC 5424 ("<PRI>VERSION ...") or carry an unexpected prefix are left to the grok.
+      source: |
+        String m = ctx.event.original;
+        int n = m.length();
+        int i = 0;
+        int pri = -1;
+        if (n > 0 && m.charAt(0) == (char)'<') {
+          int j = 1;
+          while (j < n && j < 5 && m.charAt(j) >= (char)'0' && m.charAt(j) <= (char)'9') {
+            j++;
+          }
+          if (j == 1 || j == 5 || j >= n || m.charAt(j) != (char)'>') {
+            return;
+          }
+          if (j + 1 < n && m.charAt(j + 1) >= (char)'0' && m.charAt(j + 1) <= (char)'9') {
+            return;
+          }
+          pri = Integer.parseInt(m.substring(1, j));
+          i = j + 1;
+          while (i < n && m.charAt(i) == (char)' ') {
+            i++;
+          }
+        }
+        // GREEDYDATA stops at the first line feed.
+        int end = i;
+        while (end < n && m.charAt(end) != (char)10) {
+          end++;
+        }
+        ctx.syslog5424_msg = m.substring(i, end);
+        if (pri >= 0) {
+          if (ctx.log == null) {
+            ctx.log = new HashMap();
+          }
+          if (ctx.log.syslog == null) {
+            ctx.log.syslog = new HashMap();
+          }
+          ctx.log.syslog.priority = pri;
+        }
   - grok:
       tag: grok_event_original_995e7c66
+      if: ctx.syslog5424_msg == null
       field: event.original
       ecs_compatibility: v1
       patterns:
@@ -31,25 +77,43 @@ processors:
           facility['code'] = ctx.log.syslog.priority>>3;
           ctx.log.syslog['facility'] = facility;
         }
-  - gsub:
-      tag: gsub_syslog5424_msg_b526c35d
-      field: syslog5424_msg
-      pattern: "[\x00-\x1f\x7f]"
-      replacement: ""
   - script:
-      tag: script_2073fe5f
+      tag: script_parse_kv_2073fe5f
       lang: painless
-      if: ctx.syslog5424_msg != null
+      if: ctx.syslog5424_msg instanceof String
       description: |
-        Splits syslog5424_msg KV list by space and then each by "=" taking into account quoted values.
+        Splits syslog5424_msg into key/value pairs in a single pass. Pairs are separated by
+        unquoted spaces and split on the first unquoted "=". Backslash escapes the next
+        character. Control characters are dropped, one leading and one trailing double quote
+        are stripped from values, and pairs with an "N/A" value or a key containing non-word
+        characters are discarded.
       source: |
-        def splitOnceByToken(String input, String sep) {
-          def tokens = ["", ""];
-          def startPosition = 0;
-          def isInQuotes = false;
-          def inEscape = false;
-          for (def currentPosition = 0; currentPosition < input.length(); currentPosition++) {
-            def c = input.charAt(currentPosition);
+        String s = ctx.syslog5424_msg;
+        int n = s.length();
+        StringBuilder clean = null;
+        for (int i = 0; i < n; i++) {
+          char c = s.charAt(i);
+          if (c < (char)0x20 || c == (char)0x7f) {
+            if (clean == null) {
+              clean = new StringBuilder();
+              clean.append(s.substring(0, i));
+            }
+          } else if (clean != null) {
+            clean.append(c);
+          }
+        }
+        if (clean != null) {
+          s = clean.toString();
+          n = s.length();
+        }
+        Map map = new HashMap();
+        int start = 0;
+        int eq = -1;
+        boolean inQuotes = false;
+        boolean inEscape = false;
+        for (int i = 0; i <= n; i++) {
+          if (i < n) {
+            char c = s.charAt(i);
             if (inEscape) {
               inEscape = false;
               continue;
@@ -59,69 +123,57 @@ processors:
               continue;
             }
             if (c == (char)'"') {
-              isInQuotes = !isInQuotes;
+              inQuotes = !inQuotes;
+              continue;
             }
-            else if (c == (char)sep && !isInQuotes) {
-              def token = input.substring(startPosition, currentPosition).trim();
-              if (!token.equals("")) {
-                tokens[0] = token;
+            if (inQuotes) {
+              continue;
+            }
+            if (c == (char)'=') {
+              if (eq < 0) {
+                eq = i;
               }
-              startPosition = currentPosition + 1;
-              break;
+              continue;
+            }
+            if (c != (char)' ') {
+              continue;
             }
           }
-          def lastToken = input.substring(startPosition);
-          if (!lastToken.equals(sep) && !lastToken.equals("")) {
-            tokens[1] = lastToken.trim();
-          }
-          return tokens;
-        }
-        def splitUnquoted(String input, String sep) {
-          def tokens = [];
-          def cur = input;
-          def last = cur;
-          while (cur.length() > 0) {
-            def res = splitOnceByToken(cur, sep);
-            last = cur;
-            cur = res[1].trim();
-            def token = res[0].trim();
-            if (token.length() > 0) {
-              tokens.add(token);
-            } else {
-              if (cur.length() > 0) {
-                tokens.add(cur);
+          if (eq > start) {
+            String key = s.substring(start, eq);
+            boolean valid = true;
+            for (int k = 0; k < key.length(); k++) {
+              char kc = key.charAt(k);
+              if (!((kc >= (char)'a' && kc <= (char)'z') || (kc >= (char)'A' && kc <= (char)'Z') || (kc >= (char)'0' && kc <= (char)'9') || kc == (char)'_')) {
+                valid = false;
+                break;
               }
-              break;
+            }
+            if (valid) {
+              String value = s.substring(eq + 1, i).trim();
+              if (value.equals("=")) {
+                value = "";
+              }
+              if (value.startsWith('"')) {
+                value = value.substring(1);
+              }
+              if (value.endsWith('"')) {
+                value = value.substring(0, value.length() - 1);
+              }
+              if (value.equals("N/A")) {
+                map.remove(key);
+              } else {
+                map.put(key, value);
+              }
             }
           }
-
-          return tokens;
-        }
-
-        def arr = splitUnquoted(ctx.syslog5424_msg, " ");
-
-        Map map = new HashMap();
-        Pattern pattern = /^\"|\"$/;
-        for (def i = 0; i < arr?.length; i++) {
-          def kv = splitOnceByToken(arr[i], "=");
-          if (kv.length == 2 && kv[0].length() > 0) {
-            map[kv[0]] = pattern.matcher(kv[1]).replaceAll("");
-          }
+          start = i + 1;
+          eq = -1;
         }
         if (ctx.fortinet == null) {
           ctx.fortinet = new HashMap();
         }
         ctx.fortinet.firewall = map;
-  - script:
-      tag: script_dc02f280
-      lang: painless
-      source: |
-        def fw = ctx.fortinet?.firewall;
-        if (fw != null) {
-            // We will remove any keys that are non-words to avoid polluting documents
-            def pat = /\W+/; 
-            fw.entrySet().removeIf(entry -> entry.getValue() == "N/A" || pat.matcher(entry.getKey()).find());
-        }
   - set:
       tag: set_observer_vendor_7e57c221
       field: observer.vendor
@@ -183,16 +235,13 @@ processors:
           }
         }
 
-  - set:
-      tag: set__temp_time_2240d59c
-      field: _temp.time
-      value: "{{{fortinet.firewall.date}}} {{{fortinet.firewall.time}}} {{{event.timezone}}}"
-      if: ctx.fortinet?.firewall?.date != null && ctx.fortinet?.firewall?.time != null && ctx.event?.timezone != null
+  # The zone is passed through the date processor's timezone option rather than appended
+  # to _temp.time, so the first format matches without a parse exception per event.
   - set:
       tag: set__temp_time_41a88693
       field: _temp.time
       value: "{{{fortinet.firewall.date}}} {{{fortinet.firewall.time}}}"
-      if: ctx.fortinet?.firewall?.date != null && ctx.fortinet?.firewall?.time != null && ctx.event?.timezone == null
+      if: ctx.fortinet?.firewall?.date != null && ctx.fortinet?.firewall?.time != null
   - date:
       tag: date__temp_time_to_timestamp_745b440f
       field: _temp.time
